@@ -15,7 +15,7 @@ mod window;
 
 use client::{SlackClient, spawn_poll};
 use gate::PollGate;
-use model::{Member, Reading, Status};
+use model::{Member, Reading};
 use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
@@ -71,15 +71,16 @@ impl App {
         }
     }
 
-    /// Un tour de la minuterie : vérifie les favoris prévus à ce tour (voir `schedule::users_to_poll`).
-    fn poll_tick(&self, tick: u32) {
+    /// Un tour de la minuterie (chaque minute) : revérifie seulement les cloches armées
+    /// (voir `schedule::users_to_poll`). Sauté si une vérification est déjà en cours.
+    fn poll_tick(&self) {
         let favorite_ids: Vec<String> = self
             .favorites
             .iter()
             .map(|member| member.user_id.clone())
             .collect();
-        let user_ids = schedule::users_to_poll(tick, &favorite_ids, &self.watcher.armed_ids());
-        if !user_ids.is_empty() && self.gate.borrow_mut().request() {
+        let user_ids = schedule::users_to_poll(&favorite_ids, &self.watcher.armed_ids());
+        if !user_ids.is_empty() && self.gate.borrow_mut().try_start() {
             self.start_poll_for(user_ids);
         }
     }
@@ -132,14 +133,6 @@ impl App {
     fn avatar_path(&self, member: &Member) -> Option<std::path::PathBuf> {
         let path = avatar::path_for(self.avatars_dir.as_deref()?, member)?;
         path.exists().then_some(path)
-    }
-
-    /// Favoris dont le statut est inconnu : à ne jamais présenter comme « libres ».
-    fn unknown_count(&self) -> usize {
-        self.favorites
-            .iter()
-            .filter(|member| self.watcher.status(&member.user_id) == Status::Unknown)
-            .count()
     }
 
     fn rows(&self) -> Vec<Row> {
@@ -217,6 +210,18 @@ fn main() {
     app.borrow().fetch_avatars();
     app.borrow_mut().refresh_directory_if_needed();
 
+    // L'indicateur ne montre que les cloches armées ; créé après la fenêtre (il l'ouvre), d'où la cellule vide.
+    let tray: Rc<RefCell<Option<Tray>>> = Rc::new(RefCell::new(None));
+    let refresh_tray: Rc<dyn Fn()> = Rc::new({
+        let (app, tray) = (Rc::clone(&app), Rc::clone(&tray));
+        move || {
+            let armed = app.borrow().watcher.armed_ids().len();
+            if let Some(tray) = tray.borrow_mut().as_mut() {
+                tray.show(armed);
+            }
+        }
+    });
+
     let window = Rc::new(ListWindow::new(Callbacks {
         search: Box::new({
             let app = Rc::clone(&app);
@@ -251,20 +256,24 @@ fn main() {
             }
         }),
         remove: Box::new({
-            let app = Rc::clone(&app);
+            let (app, refresh_tray) = (Rc::clone(&app), Rc::clone(&refresh_tray));
             move |user_id| {
                 let mut app = app.borrow_mut();
                 app.favorites.retain(|member| member.user_id != user_id);
                 app.watcher.forget(user_id);
                 app.save();
+                drop(app);
+                refresh_tray();
             }
         }),
         toggle_bell: Box::new({
-            let app = Rc::clone(&app);
+            let (app, refresh_tray) = (Rc::clone(&app), Rc::clone(&refresh_tray));
             move |user_id| {
                 let mut app = app.borrow_mut();
                 let armed = app.watcher.toggle_bell(user_id);
                 app.save();
+                drop(app);
+                refresh_tray();
                 armed
             }
         }),
@@ -275,27 +284,27 @@ fn main() {
     }));
 
     // Sans indicateur (bibliothèque absente), l'application continue sans icône mais les alertes fonctionnent.
-    let tray = Rc::new(RefCell::new(Tray::new({
+    *tray.borrow_mut() = Tray::new({
         let (app, window) = (Rc::clone(&app), Rc::clone(&window));
         move || {
+            // Les statuts sans cloche ne sont relus qu'ici : en attendant la lecture fraîche, ils
+            // s'affichent « inconnu » plutôt qu'avec une valeur périmée.
+            app.borrow_mut().watcher.expire_unarmed();
             window.present();
             app.borrow_mut().refresh_directory_if_needed();
             app.borrow().poll();
         }
-    })));
+    });
+    refresh_tray();
 
-    // Une vérification peu après le démarrage, puis une toutes les 5 minutes.
+    // Les cloches (persistées) sont revérifiées peu après le démarrage, puis chaque minute.
     let first_app = Rc::clone(&app);
     gtk::glib::timeout_add_seconds_local_once(config::FIRST_CHECK_SECONDS, move || {
-        first_app.borrow().poll();
+        first_app.borrow().poll_tick();
     });
-    // Un tour par minute ; le premier tour (numéro 1) ne vérifie que les cloches, la vérification
-    // complète revient au tour 5 (voir `schedule`).
     let periodic_app = Rc::clone(&app);
-    let mut tick: u32 = 1;
     gtk::glib::timeout_add_seconds_local(config::CHECK_INTERVAL_SECONDS, move || {
-        periodic_app.borrow().poll_tick(tick);
-        tick = tick.wrapping_add(1);
+        periodic_app.borrow().poll_tick();
         gtk::glib::ControlFlow::Continue
     });
 
@@ -344,14 +353,12 @@ fn main() {
                 }
             }
             app.save();
-            if let Some(tray) = tray.borrow_mut().as_mut() {
-                tray.show(app.watcher.in_call_count(), app.unknown_count());
-            }
             // Une demande arrivée pendant la vérification est relancée maintenant, une seule fois.
             if app.gate.borrow_mut().finished() {
                 app.start_poll();
             }
             drop(app);
+            refresh_tray();
             window.refresh();
         }
         gtk::glib::ControlFlow::Continue

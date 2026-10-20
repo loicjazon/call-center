@@ -57,19 +57,19 @@ impl Watcher {
         self.armed.remove(user_id);
     }
 
+    /// Les statuts sans cloche deviennent inconnus : ils ne sont plus relus automatiquement, donc
+    /// on ne les présente pas comme actuels tant qu'une lecture fraîche n'est pas arrivée.
+    pub fn expire_unarmed(&mut self) {
+        let armed = &self.armed;
+        self.statuses.retain(|user_id, _| armed.contains(user_id));
+    }
+
     pub fn is_armed(&self, user_id: &str) -> bool {
         self.armed.contains(user_id)
     }
 
     pub fn armed_ids(&self) -> HashSet<String> {
         self.armed.clone()
-    }
-
-    pub fn in_call_count(&self) -> usize {
-        self.statuses
-            .values()
-            .filter(|status| **status == Status::InCall)
-            .count()
     }
 }
 
@@ -166,19 +166,6 @@ mod tests {
     }
 
     #[test]
-    fn in_call_count_counts_only_in_call() {
-        let mut watcher = Watcher::new(HashSet::new());
-        watcher.apply(&[
-            reading("U1", Status::InCall),
-            reading("U2", Status::Online),
-            reading("U3", Status::InCall),
-            reading("U4", Status::Unknown),
-        ]);
-
-        assert_eq!(watcher.in_call_count(), 2);
-    }
-
-    #[test]
     fn forgotten_user_is_unknown_not_counted_and_not_armed() {
         let mut watcher = watcher_with_user_in_call("U1");
         watcher.toggle_bell("U1");
@@ -186,7 +173,24 @@ mod tests {
         watcher.forget("U1");
 
         assert_eq!(watcher.status("U1"), Status::Unknown);
-        assert_eq!(watcher.in_call_count(), 0);
         assert!(!watcher.is_armed("U1"));
+    }
+
+    #[test]
+    fn expiring_statuses_keeps_only_the_armed_ones() {
+        let mut watcher = Watcher::new(HashSet::new());
+        watcher.apply(&[
+            reading("U1", Status::InCall),
+            reading("U2", Status::Online),
+            reading("U3", Status::InCall),
+        ]);
+        watcher.toggle_bell("U1");
+
+        watcher.expire_unarmed();
+
+        assert_eq!(watcher.status("U1"), Status::InCall);
+        assert_eq!(watcher.status("U2"), Status::Unknown);
+        assert_eq!(watcher.status("U3"), Status::Unknown);
+        assert!(watcher.is_armed("U1"));
     }
 }

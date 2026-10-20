@@ -19,6 +19,17 @@ impl PollGate {
         }
     }
 
+    /// Démarre seulement si rien n'est en cours, sans mettre en attente (tour de minuterie : le suivant
+    /// reviendra dans une minute).
+    pub fn try_start(&mut self) -> bool {
+        if self.in_flight {
+            false
+        } else {
+            self.in_flight = true;
+            true
+        }
+    }
+
     /// À appeler quand une vérification est terminée ; `true` si une relance en attente doit démarrer.
     pub fn finished(&mut self) -> bool {
         self.in_flight = false;
@@ -70,5 +81,21 @@ mod tests {
 
         assert!(!gate.finished());
         assert!(gate.request());
+    }
+
+    #[test]
+    fn try_start_runs_when_idle() {
+        let mut gate = PollGate::default();
+
+        assert!(gate.try_start());
+    }
+
+    #[test]
+    fn try_start_while_in_flight_is_skipped_and_not_queued() {
+        let mut gate = PollGate::default();
+        gate.request();
+
+        assert!(!gate.try_start());
+        assert!(!gate.finished());
     }
 }

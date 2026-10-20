@@ -11,32 +11,21 @@ const ICON_SVG: &str = include_str!("../assets/logo.svg");
 /// Icône du thème, utilisée si le logo ne peut pas être écrit sur le disque.
 const FALLBACK_ICON: &str = "call-start-symbolic";
 
-/// Texte à côté de l'icône. Les statuts inconnus ne sont jamais comptés comme « libres ».
-pub fn label(in_call: usize, unknown: usize) -> String {
-    match (in_call, unknown) {
-        (0, 0) => String::from("libre"),
-        (count, 0) => format!("{count} en call"),
-        (0, unknown) => format!("{unknown} ?"),
-        (count, unknown) => format!("{count} en call · {unknown} ?"),
+/// Texte à côté de l'icône : seulement les cloches armées. Les statuts des collègues ne sont relus qu'à
+/// l'ouverture de la fenêtre, ils ne figurent donc pas ici (ils seraient périmés).
+pub fn label(armed: usize) -> String {
+    match armed {
+        0 => String::new(),
+        count => format!("🔔 {count}"),
     }
 }
 
 /// Ligne d'information du menu.
-pub fn summary(in_call: usize, unknown: usize) -> String {
-    let calls = match in_call {
-        0 => String::from("Personne en call"),
-        1 => String::from("1 collègue en call"),
-        count => format!("{count} collègues en call"),
-    };
-    let unknowns = match unknown {
-        0 => return calls,
-        1 => String::from("1 statut inconnu"),
-        count => format!("{count} statuts inconnus"),
-    };
-    if in_call == 0 {
-        unknowns
-    } else {
-        format!("{calls} · {unknowns}")
+pub fn summary(armed: usize) -> String {
+    match armed {
+        0 => String::from("Aucune cloche active"),
+        1 => String::from("1 cloche active"),
+        count => format!("{count} cloches actives"),
     }
 }
 
@@ -113,9 +102,9 @@ impl Tray {
     }
 
     /// Met à jour le texte à côté de l'icône et la ligne du menu.
-    pub fn show(&mut self, in_call: usize, unknown: usize) {
-        self.indicator.set_label(&label(in_call, unknown), "");
-        self.summary_line.set_label(&summary(in_call, unknown));
+    pub fn show(&mut self, armed: usize) {
+        self.indicator.set_label(&label(armed), "");
+        self.summary_line.set_label(&summary(armed));
     }
 }
 
@@ -124,36 +113,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn label_when_nobody_is_in_call() {
-        assert_eq!(label(0, 0), "libre");
+    fn label_is_empty_without_an_armed_bell() {
+        assert_eq!(label(0), "");
     }
 
     #[test]
-    fn label_counts_people_in_call() {
-        assert_eq!(label(2, 0), "2 en call");
+    fn label_counts_armed_bells() {
+        assert_eq!(label(2), "🔔 2");
     }
 
     #[test]
-    fn label_does_not_say_free_when_every_status_is_unknown() {
-        assert_eq!(label(0, 3), "3 ?");
-    }
-
-    #[test]
-    fn label_shows_both_calls_and_unknowns() {
-        assert_eq!(label(1, 2), "1 en call · 2 ?");
-    }
-
-    #[test]
-    fn summary_is_singular_for_one_person() {
-        assert_eq!(summary(1, 0), "1 collègue en call");
-        assert_eq!(summary(0, 0), "Personne en call");
-        assert_eq!(summary(3, 0), "3 collègues en call");
-    }
-
-    #[test]
-    fn summary_mentions_unknown_statuses() {
-        assert_eq!(summary(0, 1), "1 statut inconnu");
-        assert_eq!(summary(0, 2), "2 statuts inconnus");
-        assert_eq!(summary(2, 1), "2 collègues en call · 1 statut inconnu");
+    fn summary_is_singular_for_one_bell() {
+        assert_eq!(summary(0), "Aucune cloche active");
+        assert_eq!(summary(1), "1 cloche active");
+        assert_eq!(summary(3), "3 cloches actives");
     }
 }
