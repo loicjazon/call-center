@@ -1,0 +1,7 @@
+{"ok":true,"members":[
+ {"id":"U000AAA01","deleted":false,"is_bot":false,"profile":{"display_name":"alice","real_name":"Alice Exemple"}},
+ {"id":"U000AAA02","deleted":false,"is_bot":false,"profile":{"display_name":"","real_name":"Bruno Exemple"}},
+ {"id":"U000BOT01","deleted":false,"is_bot":true,"profile":{"display_name":"robot","real_name":"Robot"}},
+ {"id":"U000DEL01","deleted":true,"is_bot":false,"profile":{"display_name":"parti","real_name":"Parti Exemple"}},
+ {"id":"USLACKBOT","deleted":false,"is_bot":false,"profile":{"display_name":"slackbot","real_name":"Slackbot"}}
+],"response_metadata":{"next_cursor":"dXNlcjpVMDAwQUFBMDI="}}
