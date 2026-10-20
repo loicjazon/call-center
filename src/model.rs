@@ -34,6 +34,9 @@ impl Status {
 pub struct Member {
     pub user_id: String,
     pub name: String,
+    /// URL de la photo de profil (absente des états enregistrés avant l'ajout des avatars).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 /// Résultat d'une vérification pour un collègue.

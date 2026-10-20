@@ -18,6 +18,23 @@ fn fold(text: &str) -> String {
         .collect()
 }
 
+/// Complète les favoris (enregistrés avant les avatars, ou dont la photo a changé) avec l'annuaire.
+/// Renvoie `true` si au moins un favori a changé.
+pub fn refresh_favorite_avatars(favorites: &mut [Member], directory: &[Member]) -> bool {
+    let mut changed = false;
+    for favorite in favorites.iter_mut() {
+        let known = directory
+            .iter()
+            .find(|member| member.user_id == favorite.user_id)
+            .and_then(|member| member.avatar_url.clone());
+        if known.is_some() && known != favorite.avatar_url {
+            favorite.avatar_url = known;
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Tri alphabétique, casse et accents ignorés.
 pub fn sort_alphabetically(members: &mut [Member]) {
     members.sort_by_cached_key(|member| fold(&member.name));
@@ -63,6 +80,7 @@ mod tests {
         Member {
             user_id: user_id.to_string(),
             name: name.to_string(),
+            avatar_url: None,
         }
     }
 
@@ -125,5 +143,30 @@ mod tests {
 
         let names: Vec<&str> = members.iter().map(|member| member.name.as_str()).collect();
         assert_eq!(names, vec!["Alice", "bruno", "Éloïse", "Fanny", "zoé"]);
+    }
+
+    #[test]
+    fn favorites_get_their_avatar_from_the_directory() {
+        let mut favorites = vec![member("U1", "Alice"), member("U2", "Bruno")];
+        let mut known = member("U1", "Alice");
+        known.avatar_url = Some(String::from("https://avatars.example.com/a.jpg"));
+
+        let changed = refresh_favorite_avatars(&mut favorites, &[known]);
+
+        assert!(changed);
+        assert_eq!(
+            favorites[0].avatar_url.as_deref(),
+            Some("https://avatars.example.com/a.jpg")
+        );
+        assert_eq!(favorites[1].avatar_url, None);
+    }
+
+    #[test]
+    fn refreshing_avatars_reports_no_change_when_nothing_differs() {
+        let mut favorites = vec![member("U1", "Alice")];
+
+        let changed = refresh_favorite_avatars(&mut favorites, &[member("U1", "Alice")]);
+
+        assert!(!changed);
     }
 }

@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 const STATE_FILE: &str = "state.json";
-const MEMBERS_FILE: &str = "users-cache.json";
+/// `-v2` : l'ancien cache n'avait pas les URL d'avatar, il est ignoré pour forcer un rechargement.
+const MEMBERS_FILE: &str = "users-cache-v2.json";
 /// Au-delà, l'annuaire mis en cache est rafraîchi.
 const CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
 
@@ -125,6 +126,7 @@ mod tests {
         Member {
             user_id: String::from("U1"),
             name: String::from("Alice"),
+            avatar_url: None,
         }
     }
 
@@ -239,5 +241,19 @@ mod tests {
             Some(now - Duration::from_secs(3600)),
             now
         ));
+    }
+
+    #[test]
+    fn state_saved_before_avatars_existed_still_loads() {
+        let dir = temp_dir();
+        fs::write(
+            dir.join("state.json"),
+            r#"{"favorites":[{"user_id":"U1","name":"Alice"}],"armed":[]}"#,
+        )
+        .unwrap();
+
+        let state = load(&dir).unwrap();
+
+        assert_eq!(state.favorites, vec![alice()]);
     }
 }

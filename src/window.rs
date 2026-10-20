@@ -1,13 +1,22 @@
 use crate::model::{Member, Status};
+use gtk::gdk::prelude::*;
+use gtk::gdk_pixbuf::Pixbuf;
 use gtk::glib;
 use gtk::prelude::*;
+use std::f64::consts::PI;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+
+/// Côté de l'avatar affiché, en pixels logiques.
+const AVATAR_SIZE: i32 = 32;
 
 /// Une ligne de la liste : collègue, statut et cloche.
 pub struct Row {
     pub member: Member,
     pub status: Status,
     pub armed: bool,
+    /// Photo en cache, si elle est déjà téléchargée.
+    pub avatar: Option<PathBuf>,
 }
 
 /// Suggestions de collègues pour la saisie en cours.
@@ -30,6 +39,50 @@ pub struct ListWindow {
     window: gtk::Window,
     list: gtk::ListBox,
     callbacks: Rc<Callbacks>,
+}
+
+/// Avatar rond ; sans photo (ou photo illisible) : pastille grise avec l'initiale.
+fn avatar_widget(name: &str, path: Option<&Path>) -> gtk::DrawingArea {
+    // Chargée au double de la taille affichée pour rester nette sur les écrans HiDPI.
+    let pixbuf = path.and_then(|path| {
+        Pixbuf::from_file_at_scale(path, AVATAR_SIZE * 2, AVATAR_SIZE * 2, true).ok()
+    });
+    let initial = name
+        .chars()
+        .next()
+        .map(|letter| letter.to_uppercase().to_string())
+        .unwrap_or_default();
+
+    let area = gtk::DrawingArea::new();
+    area.set_size_request(AVATAR_SIZE, AVATAR_SIZE);
+    area.set_valign(gtk::Align::Center);
+    area.connect_draw(move |_, context| {
+        let size = f64::from(AVATAR_SIZE);
+        context.arc(size / 2.0, size / 2.0, size / 2.0, 0.0, 2.0 * PI);
+        context.clip();
+        match &pixbuf {
+            Some(pixbuf) => {
+                context.scale(0.5, 0.5);
+                context.set_source_pixbuf(pixbuf, 0.0, 0.0);
+                let _ = context.paint();
+            }
+            None => {
+                context.set_source_rgb(0.55, 0.60, 0.70);
+                let _ = context.paint();
+                context.set_source_rgb(1.0, 1.0, 1.0);
+                context.set_font_size(16.0);
+                if let Ok(extents) = context.text_extents(&initial) {
+                    context.move_to(
+                        (size - extents.width()) / 2.0 - extents.x_bearing(),
+                        (size - extents.height()) / 2.0 - extents.y_bearing(),
+                    );
+                    let _ = context.show_text(&initial);
+                }
+            }
+        }
+        glib::Propagation::Proceed
+    });
+    area
 }
 
 fn row_widget(row: &Row, list: &gtk::ListBox, callbacks: &Rc<Callbacks>) -> gtk::ListBoxRow {
@@ -59,6 +112,12 @@ fn row_widget(row: &Row, list: &gtk::ListBox, callbacks: &Rc<Callbacks>) -> gtk:
     line.set_margin_end(4);
     line.set_margin_top(4);
     line.set_margin_bottom(4);
+    line.pack_start(
+        &avatar_widget(&row.member.name, row.avatar.as_deref()),
+        false,
+        false,
+        0,
+    );
     line.pack_start(&label, true, true, 0);
     line.pack_end(&remove, false, false, 0);
 
@@ -94,7 +153,8 @@ impl ListWindow {
             glib::Propagation::Stop
         });
 
-        let suggestions = gtk::ListStore::new(&[glib::Type::STRING, glib::Type::STRING]);
+        let suggestions =
+            gtk::ListStore::new(&[glib::Type::STRING, glib::Type::STRING, glib::Type::STRING]);
         let completion = gtk::EntryCompletion::new();
         completion.set_model(Some(&suggestions));
         completion.set_text_column(0);
@@ -113,8 +173,11 @@ impl ListWindow {
         entry.connect_changed(move |entry| {
             suggestions_ref.clear();
             for member in (callbacks_ref.search)(&entry.text()) {
-                suggestions_ref
-                    .insert_with_values(None, &[(0, &member.name), (1, &member.user_id)]);
+                let avatar_url = member.avatar_url.clone().unwrap_or_default();
+                suggestions_ref.insert_with_values(
+                    None,
+                    &[(0, &member.name), (1, &member.user_id), (2, &avatar_url)],
+                );
             }
         });
 
@@ -123,8 +186,17 @@ impl ListWindow {
         completion.connect_match_selected(move |_, model, iter| {
             let name = model.value(iter, 0).get::<String>().unwrap_or_default();
             let user_id = model.value(iter, 1).get::<String>().unwrap_or_default();
+            let avatar_url = model
+                .value(iter, 2)
+                .get::<String>()
+                .ok()
+                .filter(|url| !url.is_empty());
             if !user_id.is_empty() {
-                (callbacks_ref.add)(Member { user_id, name });
+                (callbacks_ref.add)(Member {
+                    user_id,
+                    name,
+                    avatar_url,
+                });
                 populate(&list_ref, &callbacks_ref);
             }
             entry_ref.set_text("");

@@ -57,7 +57,16 @@ pub fn parse_users_page(json: &str) -> Result<(Vec<Member>, Option<String>), Str
                         .filter_map(|candidate| candidate.as_str())
                         .find(|candidate| !candidate.is_empty())?
                         .to_string();
-                    Some(Member { user_id, name })
+                    let avatar_url = [&profile["image_72"], &profile["image_48"]]
+                        .iter()
+                        .filter_map(|candidate| candidate.as_str())
+                        .find(|candidate| !candidate.is_empty())
+                        .map(str::to_string);
+                    Some(Member {
+                        user_id,
+                        name,
+                        avatar_url,
+                    })
                 })
                 .collect()
         })
@@ -133,11 +142,13 @@ mod tests {
             vec![
                 Member {
                     user_id: "U000AAA01".into(),
-                    name: "alice".into()
+                    name: "alice".into(),
+                    avatar_url: Some("https://avatars.example.com/alice_72.jpg".into())
                 },
                 Member {
                     user_id: "U000AAA02".into(),
-                    name: "Bruno Exemple".into()
+                    name: "Bruno Exemple".into(),
+                    avatar_url: None
                 },
             ]
         );

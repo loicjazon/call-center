@@ -1,3 +1,4 @@
+mod avatar;
 mod client;
 mod config;
 mod directory;
@@ -43,6 +44,9 @@ struct App {
     client: Arc<SlackClient>,
     readings_tx: Sender<Vec<Reading>>,
     members_tx: Sender<Result<Vec<Member>, String>>,
+    /// Dossier du cache des photos (`None` si HOME est inconnu : pastilles à initiales).
+    avatars_dir: Option<std::path::PathBuf>,
+    avatars_tx: Sender<()>,
 }
 
 impl App {
@@ -98,6 +102,19 @@ impl App {
         });
     }
 
+    /// Télécharge en arrière-plan les photos des favoris qui ne sont pas encore en cache.
+    fn fetch_avatars(&self) {
+        if let Some(dir) = &self.avatars_dir {
+            avatar::spawn_downloads(dir.clone(), self.favorites.clone(), self.avatars_tx.clone());
+        }
+    }
+
+    /// Photo en cache d'un collègue, si elle est déjà là.
+    fn avatar_path(&self, member: &Member) -> Option<std::path::PathBuf> {
+        let path = avatar::path_for(self.avatars_dir.as_deref()?, member)?;
+        path.exists().then_some(path)
+    }
+
     /// Favoris dont le statut est inconnu : à ne jamais présenter comme « libres ».
     fn unknown_count(&self) -> usize {
         self.favorites
@@ -114,6 +131,7 @@ impl App {
             .map(|member| Row {
                 status: self.watcher.status(&member.user_id),
                 armed: self.watcher.is_armed(&member.user_id),
+                avatar: self.avatar_path(&member),
                 member,
             })
             .collect()
@@ -158,6 +176,7 @@ fn main() {
     let (readings_tx, readings_rx): (Sender<Vec<Reading>>, Receiver<Vec<Reading>>) =
         mpsc::channel();
     let (members_tx, members_rx) = mpsc::channel::<Result<Vec<Member>, String>>();
+    let (avatars_tx, avatars_rx) = mpsc::channel::<()>();
 
     let cached = store::load_members(&config_dir);
     let directory_loaded_at = cached.as_ref().map(|(_, modified)| *modified);
@@ -173,7 +192,10 @@ fn main() {
         client: Arc::new(SlackClient::new(token)),
         readings_tx,
         members_tx,
+        avatars_dir: avatar::cache_dir(),
+        avatars_tx,
     }));
+    app.borrow().fetch_avatars();
     app.borrow_mut().refresh_directory_if_needed();
 
     let window = Rc::new(ListWindow::new(Callbacks {
@@ -205,6 +227,7 @@ fn main() {
                     app.favorites.push(member);
                     app.save();
                     app.poll();
+                    app.fetch_avatars();
                 }
             }
         }),
@@ -261,6 +284,11 @@ fn main() {
                 Ok(members) => {
                     let mut app = app.borrow_mut();
                     app.directory_loaded_at = Some(SystemTime::now());
+                    // Les favoris enregistrés avant les avatars (ou dont la photo a changé) se complètent ici.
+                    if directory::refresh_favorite_avatars(&mut app.favorites, &members) {
+                        app.save();
+                    }
+                    app.fetch_avatars();
                     if let Err(error) = store::save_members(&app.config_dir, &members) {
                         eprintln!("Cache des membres impossible : {error}");
                     }
@@ -268,6 +296,13 @@ fn main() {
                 }
                 Err(error) => eprintln!("Annuaire Slack indisponible : {error}"),
             }
+        }
+        let mut avatars_arrived = false;
+        while avatars_rx.try_recv().is_ok() {
+            avatars_arrived = true;
+        }
+        if avatars_arrived {
+            window.refresh();
         }
         while let Ok(readings) = readings_rx.try_recv() {
             let mut app = app.borrow_mut();
