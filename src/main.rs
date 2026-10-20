@@ -4,6 +4,7 @@ mod client;
 mod config;
 mod directory;
 mod model;
+mod notify;
 mod slack;
 mod store;
 mod watcher;
