@@ -51,6 +51,12 @@ impl Watcher {
         false
     }
 
+    /// Oublie un collègue retiré des favoris (statut et cloche).
+    pub fn forget(&mut self, user_id: &str) {
+        self.statuses.remove(user_id);
+        self.armed.remove(user_id);
+    }
+
     pub fn is_armed(&self, user_id: &str) -> bool {
         self.armed.contains(user_id)
     }
@@ -170,5 +176,17 @@ mod tests {
         ]);
 
         assert_eq!(watcher.in_call_count(), 2);
+    }
+
+    #[test]
+    fn forgotten_user_is_unknown_not_counted_and_not_armed() {
+        let mut watcher = watcher_with_user_in_call("U1");
+        watcher.toggle_bell("U1");
+
+        watcher.forget("U1");
+
+        assert_eq!(watcher.status("U1"), Status::Unknown);
+        assert_eq!(watcher.in_call_count(), 0);
+        assert!(!watcher.is_armed("U1"));
     }
 }
