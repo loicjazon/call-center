@@ -55,4 +55,21 @@ mod tests {
         assert_eq!(Status::Unknown.label(), "inconnu");
         assert_ne!(Status::Unknown.emoji(), Status::Online.emoji());
     }
+
+    #[test]
+    fn every_status_has_its_own_label_and_the_expected_pastille() {
+        assert_eq!(Status::Online.label(), "en ligne");
+        assert_eq!(Status::InCall.label(), "en call");
+        assert_eq!(Status::Offline.label(), "hors ligne");
+        assert_eq!(Status::Online.emoji(), "🟢");
+        assert_eq!(Status::InCall.emoji(), "🔴");
+        assert_eq!(Status::Offline.emoji(), "⚪");
+    }
+
+    #[test]
+    fn member_without_avatar_url_in_old_state_files_still_deserializes() {
+        let member: Member = serde_json::from_str(r#"{"user_id":"U1","name":"Alice"}"#).unwrap();
+
+        assert_eq!(member.avatar_url, None);
+    }
 }

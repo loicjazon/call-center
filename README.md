@@ -1,4 +1,12 @@
-# Call Center
+<p align="center">
+  <img src="docs/images/logo.svg" alt="Logo Call Center : un casque audio dans un cercle bleu" width="120">
+</p>
+
+<h1 align="center">Call Center</h1>
+
+<p align="center">
+  <a href="https://github.com/loicjazon/call-center/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Floicjazon%2Fcall-center%2Fbadges%2Fcoverage.json" alt="Couverture des tests"></a>
+</p>
 
 Sachez si un collègue est en call avant de le déranger, et soyez prévenu quand il a fini.
 
@@ -76,6 +84,7 @@ call-center probe <USER_ID>   # réponses brutes de users.info et users.getPrese
 cargo test                                  # tests unitaires
 cargo clippy --all-targets -- -D warnings   # doit rester sans avertissement
 cargo fmt --check
+cargo llvm-cov                              # couverture (cargo install cargo-llvm-cov)
 cargo build --release                       # binaire : target/release/call-center
 timeout 60 cargo run                        # c'est un démon : toujours le borner
 ```
@@ -91,6 +100,7 @@ Compiler demande les en-têtes GTK3 : `sudo apt install libgtk-3-dev`.
 | `directory.rs` | Recherche et tri des collègues |
 | `store.rs`, `config.rs` | Fichiers locaux et jeton |
 | `avatar.rs` | Cache des photos (téléchargées sans le jeton) |
+| `roster.rs` | État de l'application : favoris, cloches, annuaire, lignes de la liste (testé) |
 | `notify.rs`, `tray.rs`, `window.rs`, `main.rs` | Notification, indicateur de barre, fenêtre, assemblage |
 
 Une version se publie en poussant un tag `vX.Y.Z` égal à la version de `Cargo.toml` : le workflow compile

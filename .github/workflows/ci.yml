@@ -14,18 +14,63 @@ jobs:
     runs-on: ubuntu-latest
     # Ubuntu 22.04 : même environnement que la release, donc la même glibc minimale.
     container: ubuntu:22.04
+    outputs:
+      coverage: ${{ steps.coverage.outputs.percent }}
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
       - name: Dépendances système
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends ca-certificates curl git build-essential pkg-config libgtk-3-dev
+          apt-get install -y -qq --no-install-recommends ca-certificates curl git build-essential pkg-config libgtk-3-dev jq
       - uses: actions/checkout@v4
       - name: Rust
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal -c clippy -c rustfmt
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal -c clippy -c rustfmt -c llvm-tools-preview
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      # Lance les tests (échec = CI rouge) en mesurant la couverture.
+      - run: cargo llvm-cov --locked --no-report
+      - name: Couverture
+        id: coverage
+        run: |
+          {
+            echo '## Couverture des tests'
+            echo '```text'
+            cargo llvm-cov report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cargo llvm-cov report --html
+          percent=$(cargo llvm-cov report --json --summary-only | jq '.data[0].totals.lines.percent')
+          printf 'percent=%.1f\n' "$percent" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: couverture-html
+          path: target/llvm-cov/html
+
+  badge:
+    # Badge du README : JSON lu par shields.io, sur la branche orpheline `badges` (un seul commit, écrasé à chaque fois).
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Badge de couverture
+        env:
+          PERCENT: ${{ needs.test.outputs.coverage }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          color=$(awk -v pct="$PERCENT" 'BEGIN { print (pct >= 80 ? "brightgreen" : pct >= 60 ? "yellow" : pct >= 40 ? "orange" : "red") }')
+          mkdir badges && cd badges
+          printf '{"schemaVersion":1,"label":"couverture","message":"%s %%","color":"%s"}\n' "$PERCENT" "$color" > coverage.json
+          git init -q -b badges
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add coverage.json
+          git commit -q -m "chore: couverture ${PERCENT} %"
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges

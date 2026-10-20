@@ -71,33 +71,43 @@ fn download(url: &str, destination: &Path) -> Result<(), String> {
     fs::rename(&tmp, destination).map_err(|error| error.to_string())
 }
 
-/// Télécharge dans un thread les photos qui ne sont pas encore en cache, puis prévient une fois
-/// (`done`) pour que l'interface se redessine.
-pub fn spawn_downloads(dir: PathBuf, members: Vec<Member>, done: Sender<()>) {
-    let jobs: Vec<(PathBuf, String)> = members
+/// Photos à télécharger : celles qui ont une URL `https` et ne sont pas déjà en cache.
+fn missing_jobs(dir: &Path, members: &[Member]) -> Vec<(PathBuf, String)> {
+    members
         .iter()
         .filter_map(|member| {
-            let path = path_for(&dir, member)?;
+            let path = path_for(dir, member)?;
             let url = member.avatar_url.clone()?;
             (!path.exists()).then_some((path, url))
         })
-        .collect();
+        .collect()
+}
+
+/// Télécharge les photos (en créant le dossier du cache) ; `true` si au moins une est arrivée.
+fn fetch_jobs(dir: &Path, jobs: Vec<(PathBuf, String)>) -> bool {
+    if let Err(error) = fs::create_dir_all(dir) {
+        eprintln!("Cache des avatars indisponible : {error}");
+        return false;
+    }
+    let mut fetched = false;
+    for (path, url) in jobs {
+        match download(&url, &path) {
+            Ok(()) => fetched = true,
+            Err(error) => eprintln!("Avatar non téléchargé : {error}"),
+        }
+    }
+    fetched
+}
+
+/// Télécharge dans un thread les photos qui ne sont pas encore en cache, puis prévient une fois
+/// (`done`) pour que l'interface se redessine.
+pub fn spawn_downloads(dir: PathBuf, members: Vec<Member>, done: Sender<()>) {
+    let jobs = missing_jobs(&dir, &members);
     if jobs.is_empty() {
         return;
     }
     std::thread::spawn(move || {
-        if let Err(error) = fs::create_dir_all(&dir) {
-            eprintln!("Cache des avatars indisponible : {error}");
-            return;
-        }
-        let mut fetched = false;
-        for (path, url) in jobs {
-            match download(&url, &path) {
-                Ok(()) => fetched = true,
-                Err(error) => eprintln!("Avatar non téléchargé : {error}"),
-            }
-        }
-        if fetched {
+        if fetch_jobs(&dir, jobs) {
             let _ = done.send(());
         }
     });
@@ -106,6 +116,8 @@ pub fn spawn_downloads(dir: PathBuf, members: Vec<Member>, done: Sender<()>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::serve;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn file_name_changes_when_the_photo_changes() {
@@ -138,5 +150,128 @@ mod tests {
         assert!(!is_downloadable("http://avatars.slack-edge.com/x.jpg"));
         assert!(!is_downloadable("file:///etc/passwd"));
         assert!(!is_downloadable(""));
+    }
+
+    fn temp_dir() -> std::path::PathBuf {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "call-center-avatar-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn member(user_id: &str, avatar_url: Option<&str>) -> Member {
+        Member {
+            user_id: user_id.to_string(),
+            name: String::from("Alice"),
+            avatar_url: avatar_url.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn path_for_is_inside_the_cache_directory_for_https_urls() {
+        let dir = Path::new("/cache");
+        let path = path_for(
+            dir,
+            &member("U1", Some("https://avatars.example.com/a.jpg")),
+        )
+        .unwrap();
+
+        assert_eq!(
+            path,
+            dir.join(file_name("U1", "https://avatars.example.com/a.jpg"))
+        );
+    }
+
+    #[test]
+    fn path_for_is_none_without_a_downloadable_url() {
+        let dir = Path::new("/cache");
+
+        assert_eq!(path_for(dir, &member("U1", None)), None);
+        assert_eq!(
+            path_for(dir, &member("U1", Some("http://example.com/a.jpg"))),
+            None
+        );
+    }
+
+    #[test]
+    fn missing_jobs_skips_photos_already_in_cache_and_members_without_url() {
+        let dir = temp_dir();
+        let cached = member("U1", Some("https://avatars.example.com/a.jpg"));
+        fs::write(path_for(&dir, &cached).unwrap(), b"deja la").unwrap();
+        let members = vec![
+            cached,
+            member("U2", Some("https://avatars.example.com/b.jpg")),
+            member("U3", None),
+        ];
+
+        let jobs = missing_jobs(&dir, &members);
+
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].1, "https://avatars.example.com/b.jpg");
+    }
+
+    #[test]
+    fn download_writes_the_file_without_sending_the_slack_token() {
+        let server = serve(vec![(200, String::from("octets-de-limage"))]);
+        let destination = temp_dir().join("U1-photo");
+
+        download(&format!("{}/photo.jpg", server.base_url), &destination).unwrap();
+
+        assert_eq!(fs::read(&destination).unwrap(), b"octets-de-limage");
+        let request = server.requests.lock().unwrap()[0].to_lowercase();
+        assert!(!request.contains("authorization"), "{request}");
+    }
+
+    #[test]
+    fn download_failure_leaves_no_file() {
+        let server = serve(vec![(404, String::from("introuvable"))]);
+        let destination = temp_dir().join("U1-photo");
+
+        let result = download(&format!("{}/photo.jpg", server.base_url), &destination);
+
+        assert!(result.is_err());
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn download_is_capped_to_the_maximum_size() {
+        let server = serve(vec![(200, "x".repeat(MAX_BYTES as usize + 1000))]);
+        let destination = temp_dir().join("U1-photo");
+
+        download(&format!("{}/photo.jpg", server.base_url), &destination).unwrap();
+
+        assert_eq!(fs::metadata(&destination).unwrap().len(), MAX_BYTES);
+    }
+
+    #[test]
+    fn fetch_jobs_creates_the_directory_and_reports_success() {
+        let server = serve(vec![(200, String::from("photo"))]);
+        let dir = temp_dir().join("sous-dossier");
+        let target = dir.join("U1-photo");
+
+        let fetched = fetch_jobs(
+            &dir,
+            vec![(target.clone(), format!("{}/a.jpg", server.base_url))],
+        );
+
+        assert!(fetched);
+        assert_eq!(fs::read(&target).unwrap(), b"photo");
+    }
+
+    #[test]
+    fn fetch_jobs_reports_nothing_fetched_when_every_download_fails() {
+        let server = serve(vec![(500, String::new())]);
+        let dir = temp_dir();
+
+        let fetched = fetch_jobs(
+            &dir,
+            vec![(dir.join("U1-photo"), format!("{}/a.jpg", server.base_url))],
+        );
+
+        assert!(!fetched);
     }
 }
