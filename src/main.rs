@@ -107,12 +107,14 @@ impl App {
     }
 
     fn rows(&self) -> Vec<Row> {
-        self.favorites
-            .iter()
+        let mut sorted = self.favorites.clone();
+        directory::sort_alphabetically(&mut sorted);
+        sorted
+            .into_iter()
             .map(|member| Row {
-                member: member.clone(),
                 status: self.watcher.status(&member.user_id),
                 armed: self.watcher.is_armed(&member.user_id),
+                member,
             })
             .collect()
     }

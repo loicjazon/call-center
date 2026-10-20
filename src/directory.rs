@@ -18,6 +18,11 @@ fn fold(text: &str) -> String {
         .collect()
 }
 
+/// Tri alphabétique, casse et accents ignorés.
+pub fn sort_alphabetically(members: &mut [Member]) {
+    members.sort_by_cached_key(|member| fold(&member.name));
+}
+
 /// Membres dont le nom contient la requête (casse et accents ignorés) ; les noms qui commencent
 /// par la requête, ou dont un mot la commence, passent avant. Requête vide : aucun résultat.
 pub fn search<'a>(members: &'a [Member], query: &str, limit: usize) -> Vec<&'a Member> {
@@ -104,5 +109,21 @@ mod tests {
         ];
 
         assert_eq!(search(&members, "an", 2).len(), 2);
+    }
+
+    #[test]
+    fn members_are_sorted_alphabetically_ignoring_case_and_accents() {
+        let mut members = vec![
+            member("U1", "zoé"),
+            member("U2", "Éloïse"),
+            member("U3", "bruno"),
+            member("U4", "Alice"),
+            member("U5", "Fanny"),
+        ];
+
+        sort_alphabetically(&mut members);
+
+        let names: Vec<&str> = members.iter().map(|member| member.name.as_str()).collect();
+        assert_eq!(names, vec!["Alice", "bruno", "Éloïse", "Fanny", "zoé"]);
     }
 }
