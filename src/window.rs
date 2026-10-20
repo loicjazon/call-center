@@ -144,7 +144,7 @@ impl ListWindow {
         let callbacks = Rc::new(callbacks);
 
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("call-center");
+        window.set_title("Call Center");
         window.set_default_size(380, 420);
         window.set_position(gtk::WindowPosition::Center);
         // Fermer cache la fenêtre : l'application continue dans la barre.

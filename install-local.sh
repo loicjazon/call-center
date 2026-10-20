@@ -14,7 +14,7 @@ install -m 755 target/release/call-center "${bin_dir}/call-center"
 cat > "${autostart_dir}/call-center.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=call-center
+Name=Call Center
 Comment=Statut des collègues Slack (en call ou non)
 Exec=${bin_dir}/call-center
 Terminal=false

@@ -49,6 +49,11 @@ fn write_icon() -> Option<PathBuf> {
     Some(dir)
 }
 
+/// Fichier du logo (écrit sur le disque si besoin), pour l'icône des notifications.
+pub fn logo_path() -> Option<PathBuf> {
+    write_icon().map(|dir| dir.join(format!("{ICON_NAME}.svg")))
+}
+
 /// Indicateur dans la barre supérieure du bureau (StatusNotifier / AppIndicator).
 pub struct Tray {
     indicator: AppIndicator,
@@ -80,7 +85,7 @@ impl Tray {
         summary_line.set_sensitive(false);
         let open = gtk::MenuItem::with_label("Ouvrir la liste…");
         open.connect_activate(move |_| on_open());
-        let quit = gtk::MenuItem::with_label("Quitter call-center");
+        let quit = gtk::MenuItem::with_label("Quitter Call Center");
         quit.connect_activate(|_| gtk::main_quit());
 
         let mut menu = gtk::Menu::new();
