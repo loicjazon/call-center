@@ -153,8 +153,12 @@ impl ListWindow {
             glib::Propagation::Stop
         });
 
-        let suggestions =
-            gtk::ListStore::new(&[glib::Type::STRING, glib::Type::STRING, glib::Type::STRING]);
+        let suggestions = gtk::ListStore::new(&[
+            glib::Type::STRING,
+            glib::Type::STRING,
+            glib::Type::STRING,
+            glib::Type::STRING,
+        ]);
         let completion = gtk::EntryCompletion::new();
         completion.set_model(Some(&suggestions));
         completion.set_text_column(0);
@@ -174,9 +178,15 @@ impl ListWindow {
             suggestions_ref.clear();
             for member in (callbacks_ref.search)(&entry.text()) {
                 let avatar_url = member.avatar_url.clone().unwrap_or_default();
+                let team_id = member.team_id.clone().unwrap_or_default();
                 suggestions_ref.insert_with_values(
                     None,
-                    &[(0, &member.name), (1, &member.user_id), (2, &avatar_url)],
+                    &[
+                        (0, &member.name),
+                        (1, &member.user_id),
+                        (2, &avatar_url),
+                        (3, &team_id),
+                    ],
                 );
             }
         });
@@ -191,11 +201,17 @@ impl ListWindow {
                 .get::<String>()
                 .ok()
                 .filter(|url| !url.is_empty());
+            let team_id = model
+                .value(iter, 3)
+                .get::<String>()
+                .ok()
+                .filter(|team| !team.is_empty());
             if !user_id.is_empty() {
                 (callbacks_ref.add)(Member {
                     user_id,
                     name,
                     avatar_url,
+                    team_id,
                 });
                 populate(&list_ref, &callbacks_ref);
             }

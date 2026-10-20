@@ -260,10 +260,15 @@ fn main() {
             let mut app = app.borrow_mut();
             for member in app.roster.apply_readings(readings) {
                 let logo = tray::logo_path();
+                let link = member
+                    .team_id
+                    .as_deref()
+                    .and_then(|team_id| slack::dm_link(team_id, &member.user_id));
                 notify::send(
                     &member.name,
                     logo.as_deref(),
                     app.roster.avatar_path(&member).as_deref(),
+                    link,
                 );
             }
             // Une demande arrivée pendant la vérification est relancée maintenant, une seule fois.

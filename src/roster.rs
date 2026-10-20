@@ -191,7 +191,7 @@ impl Roster {
             eprintln!("Cache des membres impossible : {error}");
         }
         self.directory = members;
-        if directory::refresh_favorite_avatars(&mut self.favorites, &self.directory) {
+        if directory::refresh_favorites_from_directory(&mut self.favorites, &self.directory) {
             self.save();
         }
     }
@@ -222,6 +222,7 @@ mod tests {
             user_id: user_id.to_string(),
             name: name.to_string(),
             avatar_url: None,
+            team_id: None,
         }
     }
 
@@ -441,5 +442,18 @@ mod tests {
         roster.directory_refresh_failed();
 
         assert!(roster.begin_directory_refresh_if_needed(now));
+    }
+
+    #[test]
+    fn colleague_to_notify_carries_the_team_needed_for_the_conversation_link() {
+        let mut alice = member("U1", "Alice");
+        alice.team_id = Some(String::from("T1"));
+        let (mut roster, _) = roster_with(vec![alice], vec![]);
+        roster.apply_readings(vec![reading("U1", Status::InCall)]);
+        roster.toggle_bell("U1");
+
+        let to_notify = roster.apply_readings(vec![reading("U1", Status::Online)]);
+
+        assert_eq!(to_notify[0].team_id.as_deref(), Some("T1"));
     }
 }

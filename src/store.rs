@@ -127,6 +127,7 @@ mod tests {
             user_id: String::from("U1"),
             name: String::from("Alice"),
             avatar_url: None,
+            team_id: None,
         }
     }
 

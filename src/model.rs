@@ -37,6 +37,9 @@ pub struct Member {
     /// URL de la photo de profil (absente des états enregistrés avant l'ajout des avatars).
     #[serde(default)]
     pub avatar_url: Option<String>,
+    /// Espace de travail Slack (nécessaire au lien vers la conversation).
+    #[serde(default)]
+    pub team_id: Option<String>,
 }
 
 /// Résultat d'une vérification pour un collègue.

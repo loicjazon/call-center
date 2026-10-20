@@ -39,6 +39,16 @@ pub fn status_of(is_active: bool, in_huddle: bool) -> Status {
     }
 }
 
+/// Lien web qui ouvre la conversation avec un collègue dans le client Slack (navigateur).
+/// `None` si l'un des identifiants n'est pas un identifiant Slack simple (lettres et chiffres) :
+/// le lien est passé à `xdg-open`, rien d'autre ne doit pouvoir s'y glisser.
+pub fn dm_link(team_id: &str, user_id: &str) -> Option<String> {
+    let is_plain_id =
+        |id: &str| !id.is_empty() && id.chars().all(|letter| letter.is_ascii_alphanumeric());
+    (is_plain_id(team_id) && is_plain_id(user_id))
+        .then(|| format!("https://app.slack.com/client/{team_id}/{user_id}"))
+}
+
 /// Une page de `users.list` : membres utilisables (hors bots et comptes désactivés) et curseur suivant.
 pub fn parse_users_page(json: &str) -> Result<(Vec<Member>, Option<String>), String> {
     let value = parse_ok(json)?;
@@ -62,10 +72,15 @@ pub fn parse_users_page(json: &str) -> Result<(Vec<Member>, Option<String>), Str
                         .filter_map(|candidate| candidate.as_str())
                         .find(|candidate| !candidate.is_empty())
                         .map(str::to_string);
+                    let team_id = user["team_id"]
+                        .as_str()
+                        .filter(|team| !team.is_empty())
+                        .map(str::to_string);
                     Some(Member {
                         user_id,
                         name,
                         avatar_url,
+                        team_id,
                     })
                 })
                 .collect()
@@ -143,12 +158,14 @@ mod tests {
                 Member {
                     user_id: "U000AAA01".into(),
                     name: "alice".into(),
-                    avatar_url: Some("https://avatars.example.com/alice_72.jpg".into())
+                    avatar_url: Some("https://avatars.example.com/alice_72.jpg".into()),
+                    team_id: Some("T000TEAM1".into())
                 },
                 Member {
                     user_id: "U000AAA02".into(),
                     name: "Bruno Exemple".into(),
-                    avatar_url: None
+                    avatar_url: None,
+                    team_id: None
                 },
             ]
         );
@@ -160,5 +177,23 @@ mod tests {
         let (_, cursor) = parse_users_page(LAST_PAGE).unwrap();
 
         assert_eq!(cursor, None);
+    }
+
+    #[test]
+    fn dm_link_opens_the_conversation_with_the_colleague() {
+        assert_eq!(
+            dm_link("T000TEAM1", "U000AAA01"),
+            Some(String::from(
+                "https://app.slack.com/client/T000TEAM1/U000AAA01"
+            ))
+        );
+    }
+
+    #[test]
+    fn dm_link_refuses_ids_that_are_not_plain_slack_ids() {
+        assert_eq!(dm_link("T1&x=1", "U1"), None);
+        assert_eq!(dm_link("T1", "U1 --flag"), None);
+        assert_eq!(dm_link("", "U1"), None);
+        assert_eq!(dm_link("T1", ""), None);
     }
 }

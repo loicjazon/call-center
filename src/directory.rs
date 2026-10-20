@@ -18,17 +18,23 @@ fn fold(text: &str) -> String {
         .collect()
 }
 
-/// Complète les favoris (enregistrés avant les avatars, ou dont la photo a changé) avec l'annuaire.
-/// Renvoie `true` si au moins un favori a changé.
-pub fn refresh_favorite_avatars(favorites: &mut [Member], directory: &[Member]) -> bool {
+/// Complète les favoris (enregistrés avant les avatars et le lien de conversation, ou dont la photo a
+/// changé) avec l'annuaire. Renvoie `true` si au moins un favori a changé.
+pub fn refresh_favorites_from_directory(favorites: &mut [Member], directory: &[Member]) -> bool {
     let mut changed = false;
     for favorite in favorites.iter_mut() {
-        let known = directory
+        let Some(known) = directory
             .iter()
             .find(|member| member.user_id == favorite.user_id)
-            .and_then(|member| member.avatar_url.clone());
-        if known.is_some() && known != favorite.avatar_url {
-            favorite.avatar_url = known;
+        else {
+            continue;
+        };
+        if known.avatar_url.is_some() && known.avatar_url != favorite.avatar_url {
+            favorite.avatar_url = known.avatar_url.clone();
+            changed = true;
+        }
+        if known.team_id.is_some() && known.team_id != favorite.team_id {
+            favorite.team_id = known.team_id.clone();
             changed = true;
         }
     }
@@ -81,6 +87,7 @@ mod tests {
             user_id: user_id.to_string(),
             name: name.to_string(),
             avatar_url: None,
+            team_id: None,
         }
     }
 
@@ -146,14 +153,17 @@ mod tests {
     }
 
     #[test]
-    fn favorites_get_their_avatar_from_the_directory() {
+    fn favorites_get_their_avatar_and_team_from_the_directory() {
         let mut favorites = vec![member("U1", "Alice"), member("U2", "Bruno")];
         let mut known = member("U1", "Alice");
         known.avatar_url = Some(String::from("https://avatars.example.com/a.jpg"));
+        known.team_id = Some(String::from("T1"));
 
-        let changed = refresh_favorite_avatars(&mut favorites, &[known]);
+        let changed = refresh_favorites_from_directory(&mut favorites, &[known]);
 
         assert!(changed);
+        assert_eq!(favorites[0].team_id.as_deref(), Some("T1"));
+        assert_eq!(favorites[1].team_id, None);
         assert_eq!(
             favorites[0].avatar_url.as_deref(),
             Some("https://avatars.example.com/a.jpg")
@@ -165,7 +175,7 @@ mod tests {
     fn refreshing_avatars_reports_no_change_when_nothing_differs() {
         let mut favorites = vec![member("U1", "Alice")];
 
-        let changed = refresh_favorite_avatars(&mut favorites, &[member("U1", "Alice")]);
+        let changed = refresh_favorites_from_directory(&mut favorites, &[member("U1", "Alice")]);
 
         assert!(!changed);
     }

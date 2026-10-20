@@ -1,5 +1,5 @@
 {"ok":true,"members":[
- {"id":"U000AAA01","deleted":false,"is_bot":false,"profile":{"display_name":"alice","real_name":"Alice Exemple","image_48":"https://avatars.example.com/alice_48.jpg","image_72":"https://avatars.example.com/alice_72.jpg"}},
+ {"id":"U000AAA01","team_id":"T000TEAM1","deleted":false,"is_bot":false,"profile":{"display_name":"alice","real_name":"Alice Exemple","image_48":"https://avatars.example.com/alice_48.jpg","image_72":"https://avatars.example.com/alice_72.jpg"}},
  {"id":"U000AAA02","deleted":false,"is_bot":false,"profile":{"display_name":"","real_name":"Bruno Exemple"}},
  {"id":"U000BOT01","deleted":false,"is_bot":true,"profile":{"display_name":"robot","real_name":"Robot"}},
  {"id":"U000DEL01","deleted":true,"is_bot":false,"profile":{"display_name":"parti","real_name":"Parti Exemple"}},

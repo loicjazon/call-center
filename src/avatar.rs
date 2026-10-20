@@ -168,6 +168,7 @@ mod tests {
             user_id: user_id.to_string(),
             name: String::from("Alice"),
             avatar_url: avatar_url.map(str::to_string),
+            team_id: None,
         }
     }
 
