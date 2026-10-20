@@ -2,5 +2,6 @@
 
 mod model;
 mod slack;
+mod watcher;
 
 fn main() {}
