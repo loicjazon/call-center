@@ -1,6 +1,7 @@
 mod client;
 mod config;
 mod directory;
+mod gate;
 mod model;
 mod notify;
 mod probe;
@@ -11,7 +12,8 @@ mod watcher;
 mod window;
 
 use client::{SlackClient, spawn_poll};
-use model::{Member, Reading};
+use gate::PollGate;
+use model::{Member, Reading, Status};
 use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
@@ -32,6 +34,12 @@ struct App {
     favorites: Vec<Member>,
     directory: Vec<Member>,
     watcher: Watcher,
+    /// Une seule vérification en vol à la fois (voir `PollGate`).
+    gate: RefCell<PollGate>,
+    /// Faux si le fichier d'état était illisible : on n'y écrit pas, pour ne rien écraser.
+    persist: bool,
+    directory_loaded_at: Option<SystemTime>,
+    directory_loading: bool,
     client: Arc<SlackClient>,
     readings_tx: Sender<Vec<Reading>>,
     members_tx: Sender<Result<Vec<Member>, String>>,
@@ -39,6 +47,9 @@ struct App {
 
 impl App {
     fn save(&self) {
+        if !self.persist {
+            return;
+        }
         let state = State {
             favorites: self.favorites.clone(),
             armed: self.watcher.armed_ids(),
@@ -48,14 +59,34 @@ impl App {
         }
     }
 
-    /// Lance une vérification de tous les favoris (résultat lu par la boucle GTK).
+    /// Demande une vérification : lancée tout de suite, ou regroupée avec la suivante si une est en cours.
     fn poll(&self) {
+        if self.gate.borrow_mut().request() {
+            self.start_poll();
+        }
+    }
+
+    /// Lance une vérification de tous les favoris (résultat lu par la boucle GTK).
+    fn start_poll(&self) {
         let user_ids = self
             .favorites
             .iter()
             .map(|member| member.user_id.clone())
             .collect();
         spawn_poll(Arc::clone(&self.client), user_ids, self.readings_tx.clone());
+    }
+
+    /// Recharge l'annuaire s'il est vide ou périmé (au démarrage et à chaque ouverture de la fenêtre).
+    fn refresh_directory_if_needed(&mut self) {
+        let needed = store::directory_needs_refresh(
+            self.directory.len(),
+            self.directory_loaded_at,
+            SystemTime::now(),
+        );
+        if needed && !self.directory_loading {
+            self.directory_loading = true;
+            self.refresh_directory();
+        }
     }
 
     /// Recharge l'annuaire en arrière-plan.
@@ -65,6 +96,14 @@ impl App {
         std::thread::spawn(move || {
             let _ = sender.send(client.list_members());
         });
+    }
+
+    /// Favoris dont le statut est inconnu : à ne jamais présenter comme « libres ».
+    fn unknown_count(&self) -> usize {
+        self.favorites
+            .iter()
+            .filter(|member| self.watcher.status(&member.user_id) == Status::Unknown)
+            .count()
     }
 
     fn rows(&self) -> Vec<Row> {
@@ -107,27 +146,33 @@ fn main() {
         return;
     }
 
-    let state = store::load(&config_dir);
+    let (state, persist) = match store::load(&config_dir) {
+        Ok(state) => (state, true),
+        Err(error) => {
+            eprintln!("{error} : favoris non chargés, aucune sauvegarde pendant cette session");
+            (State::default(), false)
+        }
+    };
     let (readings_tx, readings_rx): (Sender<Vec<Reading>>, Receiver<Vec<Reading>>) =
         mpsc::channel();
     let (members_tx, members_rx) = mpsc::channel::<Result<Vec<Member>, String>>();
 
     let cached = store::load_members(&config_dir);
-    let cache_is_fresh = cached
-        .as_ref()
-        .is_some_and(|(_, modified)| !store::cache_is_stale(*modified, SystemTime::now()));
+    let directory_loaded_at = cached.as_ref().map(|(_, modified)| *modified);
     let app = Rc::new(RefCell::new(App {
         config_dir: config_dir.clone(),
         favorites: state.favorites,
         directory: cached.map(|(members, _)| members).unwrap_or_default(),
         watcher: Watcher::new(state.armed),
+        gate: RefCell::new(PollGate::default()),
+        persist,
+        directory_loaded_at,
+        directory_loading: false,
         client: Arc::new(SlackClient::new(token)),
         readings_tx,
         members_tx,
     }));
-    if !cache_is_fresh {
-        app.borrow().refresh_directory();
-    }
+    app.borrow_mut().refresh_directory_if_needed();
 
     let window = Rc::new(ListWindow::new(Callbacks {
         search: Box::new({
@@ -190,6 +235,7 @@ fn main() {
         let (app, window) = (Rc::clone(&app), Rc::clone(&window));
         move || {
             window.present();
+            app.borrow_mut().refresh_directory_if_needed();
             app.borrow().poll();
         }
     })));
@@ -208,9 +254,11 @@ fn main() {
     // Les threads de lecture répondent par des canaux ; la boucle GTK les vide chaque seconde.
     gtk::glib::timeout_add_seconds_local(1, move || {
         while let Ok(result) = members_rx.try_recv() {
+            app.borrow_mut().directory_loading = false;
             match result {
                 Ok(members) => {
                     let mut app = app.borrow_mut();
+                    app.directory_loaded_at = Some(SystemTime::now());
                     if let Err(error) = store::save_members(&app.config_dir, &members) {
                         eprintln!("Cache des membres impossible : {error}");
                     }
@@ -237,7 +285,11 @@ fn main() {
             }
             app.save();
             if let Some(tray) = tray.borrow_mut().as_mut() {
-                tray.show(app.watcher.in_call_count());
+                tray.show(app.watcher.in_call_count(), app.unknown_count());
+            }
+            // Une demande arrivée pendant la vérification est relancée maintenant, une seule fois.
+            if app.gate.borrow_mut().finished() {
+                app.start_poll();
             }
             drop(app);
             window.refresh();

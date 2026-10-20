@@ -10,10 +10,13 @@ pub struct Row {
     pub armed: bool,
 }
 
+/// Suggestions de collègues pour la saisie en cours.
+pub type SearchFn = Box<dyn Fn(&str) -> Vec<Member>>;
+
 /// Ce que la fenêtre demande à l'application ; la fenêtre ne connaît ni Slack ni le disque.
 pub struct Callbacks {
     /// Suggestions pour la saisie en cours.
-    pub search: Box<dyn Fn(&str) -> Vec<Member>>,
+    pub search: SearchFn,
     pub add: Box<dyn Fn(Member)>,
     pub remove: Box<dyn Fn(&str)>,
     /// Bascule la cloche ; renvoie son nouvel état.
