@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# Un seul run par tag à la fois (le doublon éventuel attend, puis constate que la release existe).
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Compilation dans Ubuntu 22.04 : le binaire n'exige pas une glibc plus récente que celle de la
+    # version minimale supportée.
+    container: ubuntu:22.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Dépendances système
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates curl git build-essential pkg-config libgtk-3-dev
+      - uses: actions/checkout@v4
+      - name: Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Le tag correspond à la version de Cargo.toml
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Le tag $GITHUB_REF_NAME ne correspond pas à la version $version de Cargo.toml." >&2
+            exit 1
+          fi
+      - run: cargo build --release --locked
+      - name: Binaire et empreinte SHA-256
+        run: |
+          mkdir dist
+          cp target/release/call-center dist/call-center-linux-x86_64
+          cd dist && sha256sum call-center-linux-x86_64 > call-center-linux-x86_64.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Idempotent : GitHub peut lancer deux fois le workflow pour un même tag (constaté sur v1.0.0) ;
+        # si la release existe déjà, on se contente de (ré)envoyer les fichiers.
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
