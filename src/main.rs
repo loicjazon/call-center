@@ -7,6 +7,8 @@ mod model;
 mod notify;
 mod slack;
 mod store;
+mod tray;
 mod watcher;
+mod window;
 
 fn main() {}

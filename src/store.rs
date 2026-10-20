@@ -2,7 +2,7 @@ use crate::model::Member;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 const STATE_FILE: &str = "state.json";
@@ -73,6 +73,7 @@ pub fn cache_is_stale(modified: SystemTime, now: SystemTime) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn temp_dir() -> PathBuf {
