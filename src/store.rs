@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 const STATE_FILE: &str = "state.json";
-/// `-v2` : l'ancien cache n'avait pas les URL d'avatar, il est ignoré pour forcer un rechargement.
-const MEMBERS_FILE: &str = "users-cache-v2.json";
+/// `-v3` : les anciens caches n'avaient pas les URL d'avatar ni l'espace de travail (lien de conversation) ;
+/// ils sont ignorés pour forcer un rechargement.
+const MEMBERS_FILE: &str = "users-cache-v3.json";
 /// Au-delà, l'annuaire mis en cache est rafraîchi.
 const CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
 
