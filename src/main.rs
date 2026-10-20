@@ -349,7 +349,7 @@ fn main() {
                 .collect();
             for user_id in app.watcher.apply(&readings) {
                 if let Some(member) = app.favorites.iter().find(|fav| fav.user_id == user_id) {
-                    notify::send(&member.name);
+                    notify::send(&member.name, app.avatar_path(member).as_deref());
                 }
             }
             app.save();
