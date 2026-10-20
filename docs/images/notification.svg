@@ -4,7 +4,7 @@
     text { font-family: Ubuntu, Cantarell, 'DejaVu Sans', sans-serif; }
     .muted { fill: #9a9a9a; }
   </style>
-  <rect x="2" y="2" width="436" height="106" rx="14" fill="#262626" stroke="#4a4a4a"/>
+  <rect x="2" y="2" width="436" height="106" rx="14" fill="#0a0d10" stroke="#272d36"/>
   <g transform="translate(16 14) scale(.36)">
     <circle cx="22" cy="22" r="21" fill="#2d6cdf"/>
     <path d="M13 17a9 9 0 0 1 18 0v4.500a9 9 0 0 1-18 0z" fill="#fff"/>
@@ -14,8 +14,8 @@
   <g fill="#eeeeec">
   <text x="42" y="28" style="font-size:14px">Call Center</text>
   <text x="130" y="28" class="muted" style="font-size:13px">À l'instant</text>
-  <circle cx="378" cy="24" r="14" fill="#3b3b3b"/><text x="378" y="29" text-anchor="middle" style="font-size:13px">⌃</text>
-  <circle cx="410" cy="24" r="14" fill="#3b3b3b"/><text x="410" y="29" text-anchor="middle" style="font-size:13px">✕</text>
+  <circle cx="378" cy="24" r="14" fill="#171b21"/><text x="378" y="29" text-anchor="middle" style="font-size:13px">⌃</text>
+  <circle cx="410" cy="24" r="14" fill="#171b21"/><text x="410" y="29" text-anchor="middle" style="font-size:13px">✕</text>
   <circle cx="44" cy="74" r="22" fill="#b0653a"/><text x="44" y="82" text-anchor="middle" style="font-size:22px">B</text>
   <text x="80" y="80" style="font-size:17px">Bruno Leroy est disponible</text>
   <circle cx="318" cy="74" r="8" fill="#4ec27a"/>
