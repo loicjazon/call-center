@@ -2,7 +2,7 @@
 
 Indicateur de la barre GNOME (Rust + GTK3) : liste vos collègues Slack favoris, indique s'ils sont
 en ligne, hors ligne ou **en huddle** (« en call »), et envoie une notification de bureau quand un
-collègue en call en sort (cloche 🔔). Vérification toutes les 5 minutes. Projet local, sans dépôt distant.
+collègue en call en sort (cloche 🔔). Vérification de tous les favoris toutes les 5 minutes, et chaque minute pour ceux dont la cloche est armée. Projet local, sans dépôt distant.
 
 ## Utilisation
 

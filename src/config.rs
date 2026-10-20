@@ -2,8 +2,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-/// Intervalle entre deux vérifications du statut des collègues (5 min).
-pub const CHECK_INTERVAL_SECONDS: u32 = 300;
+/// Un tour de vérification par minute : les cloches armées sont revérifiées à chaque tour,
+/// tous les favoris une fois sur cinq (voir `schedule`).
+pub const CHECK_INTERVAL_SECONDS: u32 = 60;
 /// Première vérification, juste après le démarrage de la boucle GTK.
 pub const FIRST_CHECK_SECONDS: u32 = 1;
 

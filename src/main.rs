@@ -6,6 +6,7 @@ mod gate;
 mod model;
 mod notify;
 mod probe;
+mod schedule;
 mod slack;
 mod store;
 mod tray;
@@ -70,13 +71,31 @@ impl App {
         }
     }
 
+    /// Un tour de la minuterie : vérifie les favoris prévus à ce tour (voir `schedule::users_to_poll`).
+    fn poll_tick(&self, tick: u32) {
+        let favorite_ids: Vec<String> = self
+            .favorites
+            .iter()
+            .map(|member| member.user_id.clone())
+            .collect();
+        let user_ids = schedule::users_to_poll(tick, &favorite_ids, &self.watcher.armed_ids());
+        if !user_ids.is_empty() && self.gate.borrow_mut().request() {
+            self.start_poll_for(user_ids);
+        }
+    }
+
     /// Lance une vérification de tous les favoris (résultat lu par la boucle GTK).
+    /// Une demande regroupée pendant une vérification en cours est rejouée ainsi, pour tout le monde.
     fn start_poll(&self) {
         let user_ids = self
             .favorites
             .iter()
             .map(|member| member.user_id.clone())
             .collect();
+        self.start_poll_for(user_ids);
+    }
+
+    fn start_poll_for(&self, user_ids: Vec<String>) {
         spawn_poll(Arc::clone(&self.client), user_ids, self.readings_tx.clone());
     }
 
@@ -270,9 +289,13 @@ fn main() {
     gtk::glib::timeout_add_seconds_local_once(config::FIRST_CHECK_SECONDS, move || {
         first_app.borrow().poll();
     });
+    // Un tour par minute ; le premier tour (numéro 1) ne vérifie que les cloches, la vérification
+    // complète revient au tour 5 (voir `schedule`).
     let periodic_app = Rc::clone(&app);
+    let mut tick: u32 = 1;
     gtk::glib::timeout_add_seconds_local(config::CHECK_INTERVAL_SECONDS, move || {
-        periodic_app.borrow().poll();
+        periodic_app.borrow().poll_tick(tick);
+        tick = tick.wrapping_add(1);
         gtk::glib::ControlFlow::Continue
     });
 
