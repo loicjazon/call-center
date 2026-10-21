@@ -152,17 +152,22 @@ impl Roster {
         path.exists().then_some(path)
     }
 
-    /// Lignes de la liste, par ordre alphabétique.
-    pub fn rows(&self) -> Vec<Row> {
+    /// Lignes de la liste, par ordre alphabétique. Pendant une vérification (`refreshing`), les collègues
+    /// dont le statut n'est pas encore connu sont marqués « en chargement ».
+    pub fn rows(&self, refreshing: bool) -> Vec<Row> {
         let mut sorted = self.favorites.clone();
         directory::sort_alphabetically(&mut sorted);
         sorted
             .into_iter()
-            .map(|member| Row {
-                status: self.watcher.status(&member.user_id),
-                armed: self.watcher.is_armed(&member.user_id),
-                avatar: self.avatar_path(&member),
-                member,
+            .map(|member| {
+                let status = self.watcher.status(&member.user_id);
+                Row {
+                    status,
+                    armed: self.watcher.is_armed(&member.user_id),
+                    avatar: self.avatar_path(&member),
+                    loading: refreshing && status == crate::model::Status::Unknown,
+                    member,
+                }
             })
             .collect()
     }
@@ -351,7 +356,7 @@ mod tests {
         ]);
         roster.toggle_bell("U1");
 
-        let rows = roster.rows();
+        let rows = roster.rows(false);
 
         let names: Vec<&str> = rows.iter().map(|row| row.member.name.as_str()).collect();
         assert_eq!(names, vec!["Alice", "Éloïse", "zoé"]);
@@ -393,13 +398,13 @@ mod tests {
         let mut alice = member("U1", "Alice");
         alice.avatar_url = Some(String::from("https://avatars.example.com/a.jpg"));
         let (roster, dir) = roster_with(vec![alice.clone()], vec![]);
-        assert_eq!(roster.rows()[0].avatar, None);
+        assert_eq!(roster.rows(false)[0].avatar, None);
 
         let photo = avatar::path_for(&dir.join("avatars"), &alice).unwrap();
         fs::create_dir_all(photo.parent().unwrap()).unwrap();
         fs::write(&photo, b"photo").unwrap();
 
-        assert_eq!(roster.rows()[0].avatar, Some(photo));
+        assert_eq!(roster.rows(false)[0].avatar, Some(photo));
     }
 
     #[test]
@@ -455,5 +460,19 @@ mod tests {
         let to_notify = roster.apply_readings(vec![reading("U1", Status::Online)]);
 
         assert_eq!(to_notify[0].team_id.as_deref(), Some("T1"));
+    }
+
+    #[test]
+    fn while_refreshing_only_colleagues_without_a_known_status_are_loading() {
+        let (mut roster, _) =
+            roster_with(vec![member("U1", "Alice"), member("U2", "Bruno")], vec![]);
+        roster.apply_readings(vec![reading("U2", Status::Online)]);
+
+        let refreshing = roster.rows(true);
+        let idle = roster.rows(false);
+
+        assert!(refreshing[0].loading, "Alice n'a pas encore de statut");
+        assert!(!refreshing[1].loading, "Bruno a déjà son statut");
+        assert!(idle.iter().all(|row| !row.loading));
     }
 }

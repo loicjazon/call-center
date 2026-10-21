@@ -16,16 +16,16 @@ mod tray;
 mod watcher;
 mod window;
 
-use client::{SlackClient, spawn_poll};
+use client::{PollEvent, SlackClient, spawn_poll};
 use gate::PollGate;
-use model::{Member, Reading};
+use model::Member;
 use roster::Roster;
 use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use store::State;
 use tray::Tray;
 use window::{Callbacks, ListWindow};
@@ -40,7 +40,7 @@ struct App {
     /// Une seule vérification en vol à la fois (voir `PollGate`).
     gate: RefCell<PollGate>,
     client: Arc<SlackClient>,
-    readings_tx: Sender<Vec<Reading>>,
+    readings_tx: Sender<PollEvent>,
     members_tx: Sender<Result<Vec<Member>, String>>,
     avatars_dir: Option<std::path::PathBuf>,
     avatars_tx: Sender<()>,
@@ -134,8 +134,7 @@ fn main() {
             (State::default(), false)
         }
     };
-    let (readings_tx, readings_rx): (Sender<Vec<Reading>>, Receiver<Vec<Reading>>) =
-        mpsc::channel();
+    let (readings_tx, readings_rx): (Sender<PollEvent>, Receiver<PollEvent>) = mpsc::channel();
     let (members_tx, members_rx) = mpsc::channel::<Result<Vec<Member>, String>>();
     let (avatars_tx, avatars_rx) = mpsc::channel::<()>();
 
@@ -205,7 +204,11 @@ fn main() {
         }),
         rows: Box::new({
             let app = Rc::clone(&app);
-            move || app.borrow().roster.rows()
+            move || {
+                let app = app.borrow();
+                let refreshing = app.gate.borrow().is_busy();
+                app.roster.rows(refreshing)
+            }
         }),
     }));
 
@@ -216,9 +219,10 @@ fn main() {
             // Les statuts sans cloche ne sont relus qu'ici : en attendant la lecture fraîche, ils
             // s'affichent « inconnu » plutôt qu'avec une valeur périmée.
             app.borrow_mut().roster.expire_unarmed();
-            window.present();
             app.borrow_mut().refresh_directory_if_needed();
+            // La lecture démarre avant l'affichage : la liste s'ouvre avec les indicateurs de chargement.
             app.borrow().poll();
+            window.present();
         }
     });
     refresh_tray();
@@ -234,8 +238,9 @@ fn main() {
         gtk::glib::ControlFlow::Continue
     });
 
-    // Les threads de lecture répondent par des canaux ; la boucle GTK les vide chaque seconde.
-    gtk::glib::timeout_add_seconds_local(1, move || {
+    // Les threads de lecture répondent par des canaux ; la boucle GTK les vide cinq fois par seconde,
+    // pour que chaque statut apparaisse dès qu'il arrive.
+    gtk::glib::timeout_add_local(Duration::from_millis(200), move || {
         while let Ok(result) = members_rx.try_recv() {
             let mut app = app.borrow_mut();
             match result {
@@ -256,24 +261,30 @@ fn main() {
         if avatars_arrived {
             window.refresh();
         }
-        while let Ok(readings) = readings_rx.try_recv() {
+        while let Ok(event) = readings_rx.try_recv() {
             let mut app = app.borrow_mut();
-            for member in app.roster.apply_readings(readings) {
-                let logo = tray::logo_path();
-                let link = member
-                    .team_id
-                    .as_deref()
-                    .and_then(|team_id| slack::dm_link(team_id, &member.user_id));
-                notify::send(
-                    &member.name,
-                    logo.as_deref(),
-                    app.roster.avatar_path(&member).as_deref(),
-                    link,
-                );
-            }
-            // Une demande arrivée pendant la vérification est relancée maintenant, une seule fois.
-            if app.gate.borrow_mut().finished() {
-                app.start_poll();
+            match event {
+                PollEvent::Reading(reading) => {
+                    for member in app.roster.apply_readings(vec![reading]) {
+                        let logo = tray::logo_path();
+                        let link = member
+                            .team_id
+                            .as_deref()
+                            .and_then(|team_id| slack::dm_link(team_id, &member.user_id));
+                        notify::send(
+                            &member.name,
+                            logo.as_deref(),
+                            app.roster.avatar_path(&member).as_deref(),
+                            link,
+                        );
+                    }
+                }
+                // Une demande arrivée pendant la vérification est relancée maintenant, une seule fois.
+                PollEvent::Done => {
+                    if app.gate.borrow_mut().finished() {
+                        app.start_poll();
+                    }
+                }
             }
             drop(app);
             refresh_tray();

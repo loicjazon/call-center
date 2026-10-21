@@ -17,6 +17,8 @@ pub struct Row {
     pub armed: bool,
     /// Photo en cache, si elle est déjà téléchargée.
     pub avatar: Option<PathBuf>,
+    /// Statut en cours de lecture : un indicateur de chargement remplace le statut.
+    pub loading: bool,
 }
 
 /// Suggestions de collègues pour la saisie en cours.
@@ -87,12 +89,16 @@ fn avatar_widget(name: &str, path: Option<&Path>) -> gtk::DrawingArea {
 
 fn row_widget(row: &Row, list: &gtk::ListBox, callbacks: &Rc<Callbacks>) -> gtk::ListBoxRow {
     let bell = if row.armed { " 🔔" } else { "" };
-    let text = format!(
-        "{} {} — {}{bell}",
-        row.status.emoji(),
-        row.member.name,
-        row.status.label()
-    );
+    let text = if row.loading {
+        format!("{} — actualisation…", row.member.name)
+    } else {
+        format!(
+            "{} {} — {}{bell}",
+            row.status.emoji(),
+            row.member.name,
+            row.status.label()
+        )
+    };
     let label = gtk::Label::new(Some(&text));
     label.set_xalign(0.0);
     label.set_hexpand(true);
@@ -120,6 +126,11 @@ fn row_widget(row: &Row, list: &gtk::ListBox, callbacks: &Rc<Callbacks>) -> gtk:
     );
     line.pack_start(&label, true, true, 0);
     line.pack_end(&remove, false, false, 0);
+    if row.loading {
+        let spinner = gtk::Spinner::new();
+        spinner.start();
+        line.pack_end(&spinner, false, false, 0);
+    }
 
     let list_row = gtk::ListBoxRow::new();
     list_row.add(&line);

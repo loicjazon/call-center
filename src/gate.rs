@@ -19,6 +19,11 @@ impl PollGate {
         }
     }
 
+    /// `true` tant qu'une vérification est en cours (y compris une relance mise en attente).
+    pub fn is_busy(&self) -> bool {
+        self.in_flight
+    }
+
     /// Démarre seulement si rien n'est en cours, sans mettre en attente (tour de minuterie : le suivant
     /// reviendra dans une minute).
     pub fn try_start(&mut self) -> bool {
@@ -97,5 +102,27 @@ mod tests {
 
         assert!(!gate.try_start());
         assert!(!gate.finished());
+    }
+
+    #[test]
+    fn gate_is_busy_from_the_start_of_a_poll_until_it_finishes() {
+        let mut gate = PollGate::default();
+        assert!(!gate.is_busy());
+
+        gate.request();
+        assert!(gate.is_busy());
+
+        gate.finished();
+        assert!(!gate.is_busy());
+    }
+
+    #[test]
+    fn gate_stays_busy_when_a_queued_poll_restarts() {
+        let mut gate = PollGate::default();
+        gate.request();
+        gate.request();
+
+        assert!(gate.finished());
+        assert!(gate.is_busy());
     }
 }

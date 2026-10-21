@@ -1,7 +1,8 @@
 use crate::model::{Member, Reading, Status};
 use crate::slack;
-use std::sync::Arc;
+use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const API_BASE: &str = "https://slack.com/api";
@@ -105,15 +106,38 @@ impl SlackClient {
     }
 }
 
-/// Lance une vérification dans un thread et envoie les lectures à la boucle GTK.
-pub fn spawn_poll(client: Arc<SlackClient>, user_ids: Vec<String>, sender: Sender<Vec<Reading>>) {
+/// Nombre de collègues lus en même temps (assez pour aller vite sans rafale sur l'API Slack).
+const MAX_PARALLEL: usize = 4;
+
+/// Ce que renvoie une vérification : un statut dès qu'il est lu, puis `Done` quand tout est fini.
+pub enum PollEvent {
+    Reading(Reading),
+    Done,
+}
+
+/// Lance une vérification en arrière-plan : les collègues sont lus `MAX_PARALLEL` à la fois, chaque statut
+/// est envoyé à la boucle GTK dès qu'il arrive (la liste se met à jour au fur et à mesure), puis `Done`.
+pub fn spawn_poll(client: Arc<SlackClient>, user_ids: Vec<String>, sender: Sender<PollEvent>) {
     std::thread::spawn(move || {
-        let readings = user_ids
-            .iter()
-            .map(|user_id| client.read_status(user_id))
-            .collect();
-        // Le récepteur peut avoir disparu à l'arrêt de l'application : sans importance.
-        let _ = sender.send(readings);
+        let queue = Mutex::new(VecDeque::from(user_ids));
+        std::thread::scope(|scope| {
+            for _ in 0..MAX_PARALLEL {
+                let worker_sender = sender.clone();
+                let (client, queue) = (&client, &queue);
+                scope.spawn(move || {
+                    loop {
+                        let next = queue.lock().unwrap().pop_front();
+                        let Some(user_id) = next else {
+                            break;
+                        };
+                        // Le récepteur peut avoir disparu à l'arrêt de l'application : sans importance.
+                        let _ =
+                            worker_sender.send(PollEvent::Reading(client.read_status(&user_id)));
+                    }
+                });
+            }
+        });
+        let _ = sender.send(PollEvent::Done);
     });
 }
 
@@ -121,7 +145,7 @@ pub fn spawn_poll(client: Arc<SlackClient>, user_ids: Vec<String>, sender: Sende
 mod tests {
     use super::*;
     use crate::model::Status;
-    use crate::test_support::serve;
+    use crate::test_support::{serve, serve_routes};
     use std::sync::mpsc;
 
     const IN_HUDDLE: &str = include_str!("../tests/fixtures/users_info_in_huddle.json");
@@ -248,19 +272,84 @@ mod tests {
         assert_eq!(error, "ratelimited");
     }
 
+    fn collect_events(receiver: &mpsc::Receiver<PollEvent>) -> Vec<PollEvent> {
+        let mut events = Vec::new();
+        loop {
+            let event = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+            let done = matches!(event, PollEvent::Done);
+            events.push(event);
+            if done {
+                return events;
+            }
+        }
+    }
+
     #[test]
-    fn spawn_poll_sends_one_batch_of_readings() {
-        let server = serve(vec![(200, IN_HUDDLE.into()), (200, ACTIVE.into())]);
+    fn poll_reads_every_colleague_in_parallel_and_ends_with_done() {
+        let server = serve_routes(
+            vec![
+                ("users.info?user=U3", (200, IN_HUDDLE.into())),
+                ("users.info", (200, FREE.into())),
+                ("users.getPresence", (200, ACTIVE.into())),
+            ],
+            12,
+        );
+        let (sender, receiver) = mpsc::channel();
+        let user_ids: Vec<String> = (1..=6).map(|index| format!("U{index}")).collect();
+
+        spawn_poll(Arc::new(client_for(&server.base_url)), user_ids, sender);
+
+        let events = collect_events(&receiver);
+        assert_eq!(events.len(), 7);
+        assert!(matches!(events.last(), Some(PollEvent::Done)));
+        let mut readings: Vec<(String, Status)> = events
+            .into_iter()
+            .filter_map(|event| match event {
+                PollEvent::Reading(reading) => Some((reading.user_id, reading.status)),
+                PollEvent::Done => None,
+            })
+            .collect();
+        readings.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(readings.len(), 6);
+        assert_eq!(readings[2], (String::from("U3"), Status::InCall));
+        assert!(
+            readings
+                .iter()
+                .filter(|(user_id, _)| user_id != "U3")
+                .all(|(_, status)| *status == Status::Online)
+        );
+    }
+
+    #[test]
+    fn polling_nobody_only_sends_done() {
         let (sender, receiver) = mpsc::channel();
 
         spawn_poll(
-            Arc::new(client_for(&server.base_url)),
-            vec![String::from("U000AAA01")],
+            Arc::new(client_for("http://127.0.0.1:1")),
+            Vec::new(),
             sender,
         );
 
-        let readings = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(readings.len(), 1);
-        assert_eq!(readings[0].status, Status::InCall);
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_secs(5)).unwrap(),
+            PollEvent::Done
+        ));
+    }
+
+    #[test]
+    fn a_failing_colleague_is_reported_unknown_and_polling_still_ends() {
+        let (sender, receiver) = mpsc::channel();
+
+        spawn_poll(
+            Arc::new(client_for("http://127.0.0.1:1")),
+            vec![String::from("U1")],
+            sender,
+        );
+
+        let events = collect_events(&receiver);
+        assert!(matches!(
+            &events[0],
+            PollEvent::Reading(reading) if reading.status == Status::Unknown
+        ));
     }
 }
