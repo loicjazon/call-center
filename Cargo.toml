@@ -1,6 +1,6 @@
 [package]
 name = "call-center"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Indique si vos collègues Slack sont en huddle et vous prévient quand ils ont fini"
 license = "MIT"
